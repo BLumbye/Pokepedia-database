@@ -49,7 +49,7 @@ function mapEvolvesTo(raw) {
           trigger: e.trigger.name,
         };
       }),
-      evolvesTo: r.evolves_to.length ? mapEvolvesTo(r.evolves_to) : null,
+      evolves_to: r.evolves_to.length ? mapEvolvesTo(r.evolves_to) : null,
     };
   });
 }
