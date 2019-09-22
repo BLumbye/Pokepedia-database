@@ -79,7 +79,7 @@ async function loadPokemonSpecies() {
       turn_upside_down: Boolean,
       trigger: String,
     }],
-    evolvesTo: [evolvesToSchema],
+    evolves_to: [evolvesToSchema],
   });
 
   const evolutionChainSchema = new mongoose.Schema({
@@ -177,7 +177,7 @@ async function loadPokemonSpecies() {
       let evolutionData = evolutionResult.data;
 
       const pokemon = new Pokemon({
-        name: speciesData.name,
+        name: speciesData.names.find(n => n.language.name === "en").name,
         sprites: pokemonData.sprites,
         id: speciesData.id,
         type: {
