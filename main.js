@@ -164,7 +164,7 @@ async function loadPokemonSpecies() {
       );
       let speciesData = speciesResult.data;
       let pokemonResult = await axios_retry(
-        speciesData.varieties[0].pokemon.url,
+        speciesData.varieties.find(v => v.is_default === true).pokemon.url,
         10000,
         10
       );
