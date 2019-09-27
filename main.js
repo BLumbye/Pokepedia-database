@@ -112,7 +112,7 @@ async function loadPokemonSpecies() {
     genus: String,
     height: Number,
     weight: Number,
-    abilities: [String],
+    abilities: [{ name: String, description: String }],
     base_experience: Number,
     growth_rate: String,
     egg_groups: [String],
@@ -121,8 +121,16 @@ async function loadPokemonSpecies() {
     generation: Number,
     stats: [{ base_stat: Number, effort: Number, name: String }],
     evolution_chain: evolutionChainSchema,
-    held_items: [String],
-    moves: [String],
+    held_items: [{ name: String, description: String }],
+    moves: [{
+      level: Number,
+      name: String,
+      category: String,
+      type: String,
+      accuracy: Number,
+      pp: Number,
+      power: Number,
+    }],
     pokedex_entry: String,
     shape: String
   });
@@ -141,6 +149,8 @@ async function loadPokemonSpecies() {
         Height
         Weight
         Abilities
+          Name
+          Description
         Base exp
         Growth rate
         Egg groups
@@ -148,12 +158,31 @@ async function loadPokemonSpecies() {
         Egg cycles
         Generation
         Stats
-        Evolution chart - what info?
+        Evolution chart
         Held items
+          Name
+          Description
         Moves
+          Level
+          Name
+          Category
+          Type
+          Accuracy
+          PP
+          Power
+          Description
         Pokédex entries - newest version
         Shape
     */
+
+  // Cache all endpoints that might be hit multiple times - moves, genus, abilities, growth rate, egg groups, held items, shape
+  const moveDictionary = {};
+  const abilityDictionary = {};
+  const growthRateDictionary = {};
+  const eggGroupDictionary = {};
+  const heldItemDictionary = {};
+  const shapeDictionary = {};
+
   let i;
   for (i = 0; i < response.data.results.length; i++) {
     try {
@@ -176,6 +205,60 @@ async function loadPokemonSpecies() {
       );
       let evolutionData = evolutionResult.data;
 
+      // Load data that might be cached
+      let growthRateId = speciesData.growth_rate.name;
+      let growthRateName;
+      if (growthRateDictionary.hasOwnProperty(growthRateId)) {
+        growthRateName = growthRateDictionary[growthRateId];
+      } else {
+        let result = await axios_retry(
+          speciesData.growth_rate.url,
+          10000,
+          10
+        );
+        growthRateName = result.data.descriptions.find(g => g.language.name === "en").description;
+        growthRateDictionary[growthRateId] = growthRateName;
+      }
+
+      let eggGroups = [];
+      for (let eggGroup in speciesData.egg_groups) {
+        let eggGroupName;
+        if (eggGroupDictionary.hasOwnProperty(eggGroup.name)) {
+          eggGroupName = eggGroupDictionary[eggGroup.name];
+        } else {
+          let result = await axios_retry(
+            eggGroup.url,
+            10000,
+            10
+          );
+          eggGroupName = result.data.names.find(
+            g => g.language.name === "en"
+          ).name;
+          eggGroupDictionary[eggGroup.name] = eggGroupName;
+        }
+        eggGroups.add(eggGroupName);
+      }
+
+      let heldItems = [];
+      for (let heldItem in speciesData.held_items) {
+        let heldItemName;
+        if (heldItemDictionary.hasOwnProperty(heldItem.name)) {
+          heldItemName = heldItemDictionary[heldItem.name];
+        } else {
+          let result = await axios_retry(
+            heldItem.url,
+            10000,
+            10
+          );
+          heldItemName = result.data.names.find(
+            g => g.language.name === "en"
+          ).name;
+          heldItemDictionary[heldItem.name] = heldItemName;
+        }
+        heldItems.add(heldItemName);
+      }
+      
+
       const pokemon = new Pokemon({
         name: speciesData.names.find(n => n.language.name === "en").name,
         sprites: pokemonData.sprites,
@@ -192,8 +275,8 @@ async function loadPokemonSpecies() {
         weight: pokemonData.weight,
         abilities: pokemonData.abilities.map(a => a.ability.name),
         base_experience: pokemonData.base_experience,
-        growth_rate: speciesData.growth_rate.name,
-        egg_groups: speciesData.egg_groups.map(e => e.name),
+        growth_rate: growthRateName,
+        egg_groups: eggGroups,
         gender_rate: speciesData.gender_rate, // number of eigths that are female
         egg_cycles: speciesData.hatch_counter,
         generation: parseInt(speciesData.generation.url.match(/\/([0-9]*)\/$/)[1]),
@@ -225,10 +308,6 @@ async function loadPokemonSpecies() {
         shape: speciesData.shape.name
       });
 
-      // Pokemon.findOneAndUpdate({id: pokemon.id}, pokemon, {upsert: true}, (err, p) => {
-      //   if (err) console.error(err);
-      //   console.log(p, i);
-      // });
       pokemon.save((err, p) => {
         if (err) console.error(err);
         console.log(p, i);
