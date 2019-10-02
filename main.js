@@ -19,7 +19,7 @@ const axios_retry = async (url, delay, n) => {
   } catch (err) {
     if (n === 1) throw err;
     await timeout(delay);
-    return await axios_retry(url, delay, n);
+    return await axios_retry(url, delay, n - 1);
   }
 };
 
@@ -92,6 +92,17 @@ async function loadPokemonSpecies() {
     }
   });
 
+  const moveSchema = new mongoose.Schema({
+    level: Number,
+    name: String,
+    category: String,
+    type: String,
+    accuracy: Number,
+    pp: Number,
+    power: Number,
+    description: String,
+  });
+
   const pokemonSchema = new mongoose.Schema({
     name: { type: String, unique: true, required: true },
     sprites: {
@@ -112,7 +123,7 @@ async function loadPokemonSpecies() {
     genus: String,
     height: Number,
     weight: Number,
-    abilities: [{ name: String, description: String }],
+    abilities: [{ name: String, description: String, is_hidden: Boolean, slot: Number }],
     base_experience: Number,
     growth_rate: String,
     egg_groups: [String],
@@ -122,15 +133,7 @@ async function loadPokemonSpecies() {
     stats: [{ base_stat: Number, effort: Number, name: String }],
     evolution_chain: evolutionChainSchema,
     held_items: [{ name: String, description: String }],
-    moves: [{
-      level: Number,
-      name: String,
-      category: String,
-      type: String,
-      accuracy: Number,
-      pp: Number,
-      power: Number,
-    }],
+    moves: [moveSchema],
     pokedex_entry: String,
     shape: String
   });
@@ -151,6 +154,8 @@ async function loadPokemonSpecies() {
         Abilities
           Name
           Description
+          Is hidden?
+          Slot
         Base exp
         Growth rate
         Egg groups
@@ -206,6 +211,52 @@ async function loadPokemonSpecies() {
       let evolutionData = evolutionResult.data;
 
       // Load data that might be cached
+      let moves = [];
+      for (let move of pokemonData.moves) {
+        let moveObject;
+        if (moveDictionary.hasOwnProperty(move.move.name)) {
+          moveObject = moveDictionary[move.move.name];
+        } else {
+          let result = await axios_retry(move.move.url, 10000, 10);
+          moveObject = {
+            level: move.version_group_details[0].level_learned_at,
+            name: result.data.names.find(g => g.language.name === "en").name,
+            category: result.data.damage_class.name,
+            type: result.data.type.name,
+            accuracy: result.data.accuracy,
+            pp: result.data.pp,
+            power: result.data.power,            
+            description: result.data.flavor_text_entries
+              .find(f => f.language.name === "en")
+              .flavor_text.replace(/\n/g, " "),
+          };
+          moveDictionary[move.move.name] = moveObject;
+          console.log('Added new move ' + moveObject.name);
+        }
+        moves.push(moveObject);
+      }
+
+      let abilities = [];
+      for (let ability of pokemonData.abilities) {
+        let abilityObject;
+        if (abilityDictionary.hasOwnProperty(ability.ability.name)) {
+          abilityObject = abilityDictionary[ability.ability.name];
+        } else {
+          let result = await axios_retry(ability.ability.url, 10000, 10);
+          abilityObject = {
+            name: result.data.names.find(g => g.language.name === "en").name,
+            description: result.data.flavor_text_entries
+              .find(f => f.language.name === "en")
+              .flavor_text.replace(/\n/g, " "),
+            is_hidden: ability.is_hidden,
+            slot: ability.slot
+          };
+          abilityDictionary[ability.ability.name] = abilityObject;
+          console.log("Added new ability " + abilityObject.name);
+        }
+        abilities.push(abilityObject);
+      }
+
       let growthRateId = speciesData.growth_rate.name;
       let growthRateName;
       if (growthRateDictionary.hasOwnProperty(growthRateId)) {
@@ -218,10 +269,11 @@ async function loadPokemonSpecies() {
         );
         growthRateName = result.data.descriptions.find(g => g.language.name === "en").description;
         growthRateDictionary[growthRateId] = growthRateName;
+        console.log("Added new growth rate " + growthRateName);
       }
 
       let eggGroups = [];
-      for (let eggGroup in speciesData.egg_groups) {
+      for (let eggGroup of speciesData.egg_groups) {
         let eggGroupName;
         if (eggGroupDictionary.hasOwnProperty(eggGroup.name)) {
           eggGroupName = eggGroupDictionary[eggGroup.name];
@@ -235,28 +287,48 @@ async function loadPokemonSpecies() {
             g => g.language.name === "en"
           ).name;
           eggGroupDictionary[eggGroup.name] = eggGroupName;
+          console.log("Added new egg group " + eggGroupName);
         }
-        eggGroups.add(eggGroupName);
+        eggGroups.push(eggGroupName);
       }
 
       let heldItems = [];
-      for (let heldItem in speciesData.held_items) {
-        let heldItemName;
-        if (heldItemDictionary.hasOwnProperty(heldItem.name)) {
-          heldItemName = heldItemDictionary[heldItem.name];
+      for (let heldItem of pokemonData.held_items) {
+        let heldItemObject;
+        if (heldItemDictionary.hasOwnProperty(heldItem.item.name)) {
+          heldItemObject = heldItemDictionary[heldItem.item.name];
         } else {
           let result = await axios_retry(
-            heldItem.url,
+            heldItem.item.url,
             10000,
             10
           );
-          heldItemName = result.data.names.find(
-            g => g.language.name === "en"
-          ).name;
-          heldItemDictionary[heldItem.name] = heldItemName;
+          heldItemObject = {
+            name: result.data.names.find(g => g.language.name === "en").name,
+            description: result.data.flavor_text_entries
+              .find(f => f.language.name === "en")
+              .text.replace(/\n/g, "")
+          };
+          heldItemDictionary[heldItem.item.name] = heldItemObject;
+          console.log("Added new held item " + heldItemObject.name);
         }
-        heldItems.add(heldItemName);
+        heldItems.push(heldItemObject);
       }
+
+      let shapeId = speciesData.shape.name;
+      let shapeName;
+      if (shapeDictionary.hasOwnProperty(shapeId)) {
+        shapeName = shapeDictionary[shapeId];
+      } else {
+        let result = await axios_retry(speciesData.shape.url, 10000, 10);
+        shapeName = result.data.names.find(
+          g => g.language.name === "en"
+        ).name;
+        shapeDictionary[shapeId] = shapeName;
+          console.log("Added new shape " + shapeName);
+      }
+
+      console.log('Loaded all endpoints for ' + speciesData.name);
       
 
       const pokemon = new Pokemon({
@@ -273,7 +345,7 @@ async function loadPokemonSpecies() {
         genus: speciesData.genera.find(g => g.language.name === "en").genus,
         height: pokemonData.height,
         weight: pokemonData.weight,
-        abilities: pokemonData.abilities.map(a => a.ability.name),
+        abilities: abilities,
         base_experience: pokemonData.base_experience,
         growth_rate: growthRateName,
         egg_groups: eggGroups,
@@ -299,13 +371,13 @@ async function loadPokemonSpecies() {
             evolves_to: mapEvolvesTo(evolutionData.chain.evolves_to),
           }
         },
-        held_items: pokemonData.held_items.map(h => h.item.name),
-        moves: pokemonData.moves.map(m => m.move.name),
+        held_items: heldItems,
+        moves: moves,
         // Entries are already sorted by version - we just need to find the first one in english
         pokedex_entry: speciesData.flavor_text_entries
           .find(f => f.language.name === "en")
           .flavor_text.replace(/\n/g, " "),
-        shape: speciesData.shape.name
+        shape: shapeName,
       });
 
       pokemon.save((err, p) => {
